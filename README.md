@@ -2,6 +2,8 @@
 
 This project automates the posting of railway disruptions to Bluesky using the atproto Python SDK. It fetches disruption information, formats it, and posts it with relevant URLs and hashtags.
 
+Current Bluesky Profile: https://bsky.app/profile/natrail-bot.bsky.social
+
 ## Features
 
 - **Automated Disruption Fetching**: Automatically fetches the latest railway disruptions from a specified source.
@@ -9,6 +11,11 @@ This project automates the posting of railway disruptions to Bluesky using the a
 - **Rate Limiting Handling**: Manages rate limits by retrying posts after a specified delay if rate limits are encountered.
 - **Logging**: Provides detailed logging of the posting process for debugging and tracking.
 - **Environment Configuration**: Uses environment variables for secure handling of login credentials.
+
+## Todo
+
+- Make it so that there is a thumbnail card of the national rail site link that is posted.
+- Need to work out how to use multiple ips so it can read national rail site with out being blocked.
 
 ## Requirements
 
