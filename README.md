@@ -4,6 +4,8 @@ This project automates the posting of railway disruptions to Bluesky using the a
 
 Current Bluesky Profile: https://bsky.app/profile/natrail-bot.bsky.social
 
+Data Taken from: https://www.nationalrail.co.uk/status-and-disruptions/
+
 ## Features
 
 - **Automated Disruption Fetching**: Automatically fetches the latest railway disruptions from a specified source.
