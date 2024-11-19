@@ -1,4 +1,4 @@
 requests
 atproto
-BeautifulSoup
+BeautifulSoup4
 python-dotenv
