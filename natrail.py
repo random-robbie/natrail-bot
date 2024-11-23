@@ -12,6 +12,51 @@ from dotenv import load_dotenv
 import os
 import json
 import random
+# Added for when running via a proxy
+from requests.packages.urllib3.exceptions import InsecureRequestWarning
+requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
+
+
+# Set sessions
+session = requests.Session()
+
+# Proxy for debugging.
+http_proxy = ""
+os.environ['HTTP_PROXY'] = http_proxy
+os.environ['HTTPS_PROXY'] = http_proxy
+
+
+# List of 20 real user agents
+user_agents = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.159 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edge/92.0.902.73 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Firefox/92.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Safari/537.36 Edge/95.0.1020.53",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Firefox/91.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:90.0) Gecko/20100101 Firefox/90.0",
+    "Mozilla/5.0 (Linux; Android 10; Pixel 3 XL) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36",
+    "Mozilla/5.0 (Linux; Android 10; SM-G973F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Mobile Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:91.0) Gecko/20100101 Firefox/91.0",
+    "Mozilla/5.0 (Linux; Android 11; Pixel 4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36",
+    "Mozilla/5.0 (Windows NT 6.1; WOW64; rv:50.0) Gecko/20100101 Firefox/50.0",
+    "Mozilla/5.0 (Linux; Android 9; SM-J737T1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Mobile Safari/537.36",
+    "Mozilla/5.0 (Windows NT 6.3; Trident/7.0; AS; rv:11.0) like Gecko",
+    "Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 6.3; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.159 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/93.0.4577.82 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 6.1; Trident/7.0; AS; rv:11.0) like Gecko"
+]
+
+# Pick a random User Agent.
+random_user_agent = random.choice(user_agents)
+
+# Default headers for all requests
+headers = {"Upgrade-Insecure-Requests":"1","Priority":"u=0, i","User-Agent":random_user_agent,"Sec-Fetch-Dest":"document","Sec-Fetch-Site":"none","Sec-Fetch-User":"?1","Accept-Language":"en-US,en;q=0.5","Sec-Fetch-Mode":"navigate"}
+
+
 
 # Load environment variables from .env file
 load_dotenv()
@@ -59,6 +104,45 @@ client = Client()
 
 # Absolute file path for seen disruptions
 seen_disruptions_file = '/home/u/natrail/seen_disruptions.json'
+
+def fetch_embed_url_card(link: str, description: str) -> Dict:
+    """Fetch OG metadata from the URL and return a card dictionary."""
+    # The required fields for every embed card
+    card = {
+        "uri": link,
+        "title": "National Rail Delays",
+        "description": ""+description+"",
+    }
+
+    try:
+        # Fetch the HTML
+        resp = requests.get(link,headers=headers,verify=False,)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "html.parser")
+
+        # Parse out the "og:title" and "og:description" HTML meta tags
+        title_tag = soup.find("meta", property="og:title")
+        if title_tag:
+            card["title"] = title_tag["content"]
+        description_tag = soup.find("meta", property="og:description")
+        if description_tag:
+            card["description"] = description_tag["content"]
+
+        # If there is an "og:image" HTML meta tag, fetch and upload that image
+        image_tag = soup.find("meta", property="og:image")
+        if image_tag:
+            img_url = image_tag["content"]
+            # Naively turn a "relative" URL (just a path) into a full URL, if needed
+            if "://" not in img_url:
+                img_url = url + img_url
+            resp = requests.get(img_url)
+            resp.raise_for_status()
+            card["image"] = img_url  # Add the image URL to the card
+
+    except requests.RequestException as e:
+        logger.error(f"Failed to fetch embed URL card: {e}")
+
+    return card
 
 
 def modify_string(text):
@@ -120,18 +204,18 @@ def save_seen_disruptions(seen_disruptions):
 # Set of seen disruptions to avoid posting the same one twice
 seen_disruptions = load_seen_disruptions()
 
-def fetch_disruptions():
+def fetch_disruptions(random_user_agent):
     """Scrape the disruptions from National Rail page."""
     try:
     
         # Define the User Agent
-        headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'}
+        headers = {"Upgrade-Insecure-Requests":"1","Priority":"u=0, i","User-Agent":random_user_agent,"Sec-Fetch-Dest":"document","Sec-Fetch-Site":"none","Sec-Fetch-User":"?1","Accept-Language":"en-US,en;q=0.5","Sec-Fetch-Mode":"navigate"}
 
         # Send a request to fetch the HTML content of the page
-        response = requests.get(url, headers=headers)
+        response = requests.get(url, headers=headers,verify=False)
         response.raise_for_status()  # Raise an exception if there's an error
         logger.info("Successfully fetched data from National Rail website.")
-
+        response.encoding = 'utf-8'
         # Parse the HTML content using BeautifulSoup
         soup = BeautifulSoup(response.content, 'html.parser')
 
@@ -160,7 +244,8 @@ def fetch_disruptions():
         logger.error(f"Error fetching disruptions: {e}")
         return []
 
-def post_to_bluesky(message: str, facets: List[models.AppBskyRichtextFacet.Main] = None):
+def post_to_bluesky(message: str, url: str, link: str, description: str, facets: List[models.AppBskyRichtextFacet.Main] = None):
+
     """Post a disruption message to Bluesky using the atproto client."""
     retry_attempts = 3
     retry_delay = 120  # 2 minutes in seconds
@@ -172,17 +257,28 @@ def post_to_bluesky(message: str, facets: List[models.AppBskyRichtextFacet.Main]
             bluesky_password = os.getenv("BLUESKY_PASSWORD")
             profile = client.login(bluesky_handle, bluesky_password)
             logger.info(f"Logged in to Bluesky as {bluesky_handle}")
+            card = fetch_embed_url_card(link,description)
+            # Create the embed for the URL
+            embed = {
+                "$type": "app.bsky.embed.external",
+                "external": {
+                    "uri": card["uri"],
+                    "title": card["title"],
+                    "description": card["description"],
+                    "image": "https://images.nationalrail.co.uk/e8xgegruud3g/6PW6rjXST38APdJ49Og4uy/c87345a42e333defba267acade21faa0/aa-NationalRailLogo-noBeta.svg"  # Use default if no image
+                }
+            }
 
             # Send the post to Bluesky
             response = client.send_post(
                 text=message,
+                embed=embed,
                 facets=facets  # Add the facets for URL embedding
             )
 
-            
             # Log the full response to inspect the structure
             logger.debug(f"Response from Bluesky: {response}")
-            
+
             # Check if the response contains the necessary fields ('did' or 'uri')
             if 'did' not in str(response) or 'uri' not in str(response):
                 logger.error(f"Failed to post message. Response missing expected fields: {response}")
@@ -204,8 +300,9 @@ def post_to_bluesky(message: str, facets: List[models.AppBskyRichtextFacet.Main]
             logger.error(f"Failed to post to Bluesky: {e}")
             break  # Break the loop on other errors (non-rate-limit related)
 
+
 def main():
-    disruptions = fetch_disruptions()  # Fetch disruptions from wherever it's sourced
+    disruptions = fetch_disruptions(random_user_agent)  # Fetch disruptions from wherever it's sourced
 
     if disruptions:
         for description, link in disruptions:
@@ -241,7 +338,7 @@ def main():
                 facets.append(hashtag_facet)
 
             # Post the message to Bluesky with the richtext facets (which may contain embeds)
-            post_to_bluesky(message, facets=facets)
+            post_to_bluesky(message, url, link, description, facets=facets)
             
             # Wait between posts to avoid spamming
             time.sleep(20)
