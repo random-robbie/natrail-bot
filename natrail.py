@@ -9,6 +9,7 @@ import re
 from typing import List, Dict, Tuple
 import typing as t
 from dotenv import load_dotenv
+from atproto_client.models.blob_ref import BlobRef
 import os
 import json
 import random
@@ -104,6 +105,16 @@ client = Client()
 
 # Absolute file path for seen disruptions
 seen_disruptions_file = '/home/u/natrail/seen_disruptions.json'
+
+def create_blob_ref(link: str, mime_type: str, size: int) -> BlobRef:
+    """Create a BlobRef object."""
+    return BlobRef(
+        mime_type=mime_type,
+        ref=link,  # Assuming URL can be directly used as CID
+        size=size,
+        py_type='blob'
+    )
+
 
 def fetch_embed_url_card(link: str, description: str) -> Dict:
     """Fetch OG metadata from the URL and return a card dictionary."""
@@ -246,8 +257,8 @@ def fetch_disruptions(random_user_agent):
         logger.error(f"Error fetching disruptions: {e}")
         return []
 
-def post_to_bluesky(message: str, url: str, link: str, description: str, facets: List[models.AppBskyRichtextFacet.Main] = None):
 
+def post_to_bluesky(message: str, url: str, link: str, description: str, facets: List[models.AppBskyRichtextFacet.Main] = None):
     """Post a disruption message to Bluesky using the atproto client."""
     retry_attempts = 3
     retry_delay = 120  # 2 minutes in seconds
@@ -259,7 +270,18 @@ def post_to_bluesky(message: str, url: str, link: str, description: str, facets:
             bluesky_password = os.getenv("BLUESKY_PASSWORD")
             profile = client.login(bluesky_handle, bluesky_password)
             logger.info(f"Logged in to Bluesky as {bluesky_handle}")
-            card = fetch_embed_url_card(link,description)
+            
+            # Fetch the embed card
+            card = fetch_embed_url_card(link, description)
+
+            # Set up default image URL and thumbnail size
+            image_url = "https://images.nationalrail.co.uk/e8xgegruud3g/6PW6rjXST38APdJ49Og4uy/c87345a42e333defba267acade21faa0/aa-NationalRailLogo-noBeta.svg"
+            mime_type = "image/svg"
+            size = 5134  # Actual size in bytes of the image
+            
+            # Create the BlobRef object for the thumbnail
+            thumb_blob_ref = create_blob_ref(image_url, mime_type, size)
+
             # Create the embed for the URL
             embed = {
                 "$type": "app.bsky.embed.external",
@@ -267,10 +289,8 @@ def post_to_bluesky(message: str, url: str, link: str, description: str, facets:
                     "uri": card["uri"],
                     "title": card["title"],
                     "description": card["description"],
-                    "image": card.get("image", "https://images.nationalrail.co.uk/e8xgegruud3g/6PW6rjXST38APdJ49Og4uy/c87345a42e333defba267acade21faa0/aa-NationalRailLogo-noBeta.svg"),  # Use default if no image
-                    "thumb": card.get("image", "https://images.nationalrail.co.uk/e8xgegruud3g/6PW6rjXST38APdJ49Og4uy/c87345a42e333defba267acade21faa0/aa-NationalRailLogo-noBeta.svg")  # Use default if no image
-                }
-            }
+                    "image": card.get("image", image_url)
+            }}
 
             # Send the post to Bluesky
             response = client.send_post(
@@ -285,8 +305,7 @@ def post_to_bluesky(message: str, url: str, link: str, description: str, facets:
             # Check if the response contains the necessary fields ('did' or 'uri')
             if 'did' not in str(response) or 'uri' not in str(response):
                 logger.error(f"Failed to post message. Response missing expected fields: {response}")
-                exit()
-                break
+                break  # Exit if the response doesn't have the expected fields
 
             logger.info(f"Successfully posted message to Bluesky: {message}")
             break  # If post is successful, break out of the loop
@@ -304,6 +323,18 @@ def post_to_bluesky(message: str, url: str, link: str, description: str, facets:
             break  # Break the loop on other errors (non-rate-limit related)
 
 
+
+
+
+
+
+
+
+
+
+
+
+            
 def main():
     disruptions = fetch_disruptions(random_user_agent)  # Fetch disruptions from wherever it's sourced
 
