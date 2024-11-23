@@ -150,6 +150,8 @@ def modify_string(text):
     text = re.sub(r'(between[^A-Z]*)([A-Z])', r'\1#\2', text)
     # Find the first capital letter after 'and'
     text = re.sub(r'(and[^A-Z]*)([A-Z])', r'\1#\2', text)
+    text = re.sub(r'(from[^A-Z]*)([A-Z])', r'\1#\2', text)
+    text = re.sub(r'\b(Northern|Merseyrail)\b', r'#\1', text)
     return text
 
 def extract_hashtag_byte_positions(text: str, *, encoding: str = 'UTF-8') -> List[Tuple[str, int, int]]:
@@ -265,7 +267,8 @@ def post_to_bluesky(message: str, url: str, link: str, description: str, facets:
                     "uri": card["uri"],
                     "title": card["title"],
                     "description": card["description"],
-                    "image": "https://images.nationalrail.co.uk/e8xgegruud3g/6PW6rjXST38APdJ49Og4uy/c87345a42e333defba267acade21faa0/aa-NationalRailLogo-noBeta.svg"  # Use default if no image
+                    "image": card.get("image", "https://images.nationalrail.co.uk/e8xgegruud3g/6PW6rjXST38APdJ49Og4uy/c87345a42e333defba267acade21faa0/aa-NationalRailLogo-noBeta.svg"),  # Use default if no image
+                    "thumb": card.get("image", "https://images.nationalrail.co.uk/e8xgegruud3g/6PW6rjXST38APdJ49Og4uy/c87345a42e333defba267acade21faa0/aa-NationalRailLogo-noBeta.svg")  # Use default if no image
                 }
             }
 
@@ -309,7 +312,7 @@ def main():
             # Add hashtags
             description = modify_string(description)
             # Format the message to include the disruption description and the URL
-            message = f"{description}\n\n{link}"
+            message = f"{description}\n"
             logger.info(f"Posting disruption: {message}")
 
             # Parse URLs in the message to ensure they are valid and can be used (e.g., for thumbnails)
