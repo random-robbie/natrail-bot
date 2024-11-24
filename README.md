@@ -14,16 +14,14 @@ Data Taken from: https://www.nationalrail.co.uk/status-and-disruptions/
 - **Logging**: Provides detailed logging of the posting process for debugging and tracking.
 - **Environment Configuration**: Uses environment variables for secure handling of login credentials.
 
-## Todo
-
-- Make it so that there is a thumbnail card of the national rail site link that is posted.
-- Need to work out how to use multiple ips so it can read national rail site with out being blocked.
 
 ## Requirements
 
 - Python 3.x
 - `atproto` library
 - `python-dotenv` library
+- `flickrapi` library
+- `requests` library
 
 ## Installation
 
@@ -38,10 +36,12 @@ Data Taken from: https://www.nationalrail.co.uk/status-and-disruptions/
     pip install -r requirements.txt
     ```
 
-3. Create a `.env` file in the project root and add your Bluesky handle and password:
+3. Edit the `.env` file in the project root and add your Bluesky handle and password:
     ```env
     BLUESKY_HANDLE=your-handle
     BLUESKY_PASSWORD=your-password
+    FLICKR_API_KEY=your_api_key_here
+    FLICKR_API_SECRET=your_api_secret_here
     ```
 
 ## Usage
