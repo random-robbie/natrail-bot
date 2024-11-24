@@ -1,18 +1,22 @@
-import requests
-from requests.exceptions import HTTPError
-from bs4 import BeautifulSoup
+import flickrapi
+import httpx
+import json
 import logging
+import os
+import random
+import re
+import requests
+import sqlite3
 import time
+import typing as t
 from atproto import Client
 from atproto import models
-import re
-from typing import List, Dict, Tuple
-import typing as t
-from dotenv import load_dotenv
 from atproto_client.models.blob_ref import BlobRef
-import os
-import json
-import random
+from bs4 import BeautifulSoup
+from datetime import datetime
+from dotenv import load_dotenv
+from requests.exceptions import HTTPError
+from typing import List, Dict, Tuple
 # Added for when running via a proxy
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
@@ -103,57 +107,211 @@ if not bluesky_handle or not bluesky_password:
 # Initialize the Bluesky client
 client = Client()
 
-# Absolute file path for seen disruptions
-seen_disruptions_file = '/home/u/natrail/seen_disruptions.json'
 
-def create_blob_ref(link: str, mime_type: str, size: int) -> BlobRef:
-    """Create a BlobRef object."""
-    return BlobRef(
-        mime_type=mime_type,
-        ref=link,  # Assuming URL can be directly used as CID
-        size=size,
-        py_type='blob'
+# Patterns for Og title etc
+_META_PATTERN = re.compile(r'<meta property="og:.*?>')
+_CONTENT_PATTERN = re.compile(r'<meta[^>]+content="([^"]+)"')
+
+
+
+
+
+
+
+def search_random_image():
+    # Get API key and secret from environment variables
+    api_key = os.getenv('FLICKR_API_KEY')
+    api_secret = os.getenv('FLICKR_API_SECRET')
+    search_string = 'Uk eletric trains'
+    # Initialize the Flickr API
+    flickr = flickrapi.FlickrAPI(api_key, api_secret, format='parsed-json')
+
+    # Search for photos using the provided search string
+    response = flickr.photos.search(text=search_string, per_page=10)  # Fetch 10 images
+
+    # Extract photos from the response
+    photos = response['photos']['photo']
+    
+    # Check if any photos were found
+    if photos:
+        # Choose a random photo from the list
+        random_photo = random.choice(photos)
+        # Construct the URL for the image
+        image_url = f"https://live.staticflickr.com/{random_photo['server']}/{random_photo['id']}_{random_photo['secret']}.jpg"
+        return image_url
+    else:
+        return None
+
+
+
+
+
+
+
+# Initialize the SQLite database
+def create_db():
+    # Connect to SQLite database (or create it if it doesn't exist)
+    conn = sqlite3.connect('disruptions.db')
+    cursor = conn.cursor()
+
+    # Create table if it doesn't exist
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS disruptions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        disruption TEXT NOT NULL,
+        link TEXT NOT NULL,
+        posted INTEGER DEFAULT 0,
+        date TEXT NOT NULL
     )
+    ''')
+
+    # Commit and close
+    conn.commit()
+    conn.close()
+
+def insert_disruption(description, link, date):
+    """Inserts a new disruption into the database."""
+    conn = sqlite3.connect('disruptions.db')
+    cursor = conn.cursor()
+
+    # Use INSERT OR IGNORE to ensure no duplicates are added based on the description and link
+    cursor.execute('''
+        INSERT OR IGNORE INTO disruptions (disruption, link, posted, date)
+        VALUES (?, ?, 0, ?)
+    ''', (description, link, date))
+
+    conn.commit()
+    conn.close()
 
 
-def fetch_embed_url_card(link: str, description: str) -> Dict:
-    """Fetch OG metadata from the URL and return a card dictionary."""
-    # The required fields for every embed card
-    card = {
-        "uri": link,
-        "title": "National Rail Delays",
-        "description": ""+description+"",
-    }
+def update_posted(link):
+    conn = sqlite3.connect('disruptions.db')
+    cursor = conn.cursor()
 
+    # Update the 'posted' column to 1 where the disruption and link match
+    cursor.execute('''
+    UPDATE disruptions
+    SET posted = 1
+    WHERE link = ?
+    ''', (link,))  # Ensure link is passed as a tuple
+
+    conn.commit()
+    conn.close()
+    logger.debug(link)
+    logger.info(f"Updated 'posted' to 1 for disruption with link: {link}")
+    
+    
+# Function to fetch all unposted disruptions from the database
+def get_unposted_disruptions():
+    conn = sqlite3.connect('disruptions.db')
+    cursor = conn.cursor()
+
+    # Retrieve all disruptions where posted = 0
+    cursor.execute('''
+    SELECT disruption, link FROM disruptions WHERE posted = 0
+    ''')
+
+    # Fetch all the unposted disruptions
+    unposted_disruptions = cursor.fetchall()
+
+    conn.close()
+
+    return unposted_disruptions
+
+
+def fetch_disruptions(random_user_agent):
+    """Scrape the disruptions from National Rail page and save to SQLite database."""
     try:
-        # Fetch the HTML
-        resp = requests.get(link,headers=headers,verify=False,)
-        resp.raise_for_status()
-        soup = BeautifulSoup(resp.text, "html.parser")
+        # Define the User Agent
+        headers = {
+            "Upgrade-Insecure-Requests": "1",
+            "Priority": "u=0, i",
+            "User-Agent": random_user_agent,
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Site": "none",
+            "Sec-Fetch-User": "?1",
+            "Accept-Language": "en-US,en;q=0.5",
+            "Sec-Fetch-Mode": "navigate"
+        }
 
-        # Parse out the "og:title" and "og:description" HTML meta tags
-        title_tag = soup.find("meta", property="og:title")
-        if title_tag:
-            card["title"] = title_tag["content"]
-        description_tag = soup.find("meta", property="og:description")
-        if description_tag:
-            card["description"] = description_tag["content"]
+        # Send a request to fetch the HTML content of the page
+        response = requests.get(url, headers=headers, verify=False)
+        response.raise_for_status()  # Raise an exception if there's an error
+        logger.info("Successfully fetched data from National Rail website.")
+        response.encoding = 'utf-8'
+        
+        # Parse the HTML content using BeautifulSoup
+        soup = BeautifulSoup(response.content, 'html.parser')
 
-        # If there is an "og:image" HTML meta tag, fetch and upload that image
-        image_tag = soup.find("meta", property="og:image")
-        if image_tag:
-            img_url = image_tag["content"]
-            # Naively turn a "relative" URL (just a path) into a full URL, if needed
-            if "://" not in img_url:
-                img_url = url + img_url
-            resp = requests.get(img_url)
-            resp.raise_for_status()
-            card["image"] = img_url  # Add the image URL to the card
+        # Find all the disruption list items
+        disruptions = soup.find_all('li', class_='styled__StyledNotificationListItem-sc-nisfz3-3')
+
+        disruptions_list = []
+
+        for disruption in disruptions:
+            link = disruption.find('a', class_='styled__StyledNotificationBox-sc-2fuu9j-2')
+            if link:
+                aria_label = link.get('aria-label', 'No description available').strip()
+                href = link.get('href', '#').strip()
+
+                # Ensure the link has the full URL
+                full_link = f"https://www.nationalrail.co.uk{href}"
+
+                # Get the current date for the disruption
+                date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+                # Save disruption to the database
+                insert_disruption(aria_label, full_link, date)
+
+                # Add the disruption to the list
+                disruptions_list.append((aria_label, full_link, date))
+
+        # Log the number of new disruptions
+        logger.info(f"Found {len(disruptions_list)} new disruptions.")
+        return disruptions_list
 
     except requests.RequestException as e:
-        logger.error(f"Failed to fetch embed URL card: {e}")
+        logger.error(f"Error fetching disruptions: {e}")
+        return []
 
-    return card
+
+def _find_tag(og_tags: t.List[str], search_tag: str) -> t.Optional[str]:
+    for tag in og_tags:
+        if search_tag in tag:
+            return tag
+
+    return None
+
+
+def _get_tag_content(tag: str) -> t.Optional[str]:
+    match = _CONTENT_PATTERN.match(tag)
+    if match:
+        return match.group(1)
+
+    return None
+
+
+def _get_og_tag_value(og_tags: t.List[str], tag_name: str) -> t.Optional[str]:
+    tag = _find_tag(og_tags, tag_name)
+    if tag:
+        return _get_tag_content(tag)
+
+    return None
+
+
+def get_og_tags(url: str) -> t.Tuple[t.Optional[str], t.Optional[str], t.Optional[str]]:
+    response = httpx.get(url)
+    response.raise_for_status()
+
+    og_tags = _META_PATTERN.findall(response.text)
+
+    og_image = _get_og_tag_value(og_tags, 'og:image')
+    og_title = _get_og_tag_value(og_tags, 'og:title')
+    og_description = _get_og_tag_value(og_tags, 'og:description')
+
+    return og_image, og_title, og_description
+
+
 
 
 def modify_string(text):
@@ -201,64 +359,10 @@ def extract_url_byte_positions(text: str, *, encoding: str = 'UTF-8') -> t.List[
 
     return url_byte_positions
 
-    
-def load_seen_disruptions():
-    """Load seen disruptions from a JSON file."""
-    if os.path.exists(seen_disruptions_file):
-        with open(seen_disruptions_file, 'r') as file:
-            return set(json.load(file))
-    return set()
-
-def save_seen_disruptions(seen_disruptions):
-    """Save the seen disruptions to a JSON file."""
-    with open(seen_disruptions_file, 'w') as file:
-        json.dump(list(seen_disruptions), file)
-
-# Set of seen disruptions to avoid posting the same one twice
-seen_disruptions = load_seen_disruptions()
-
-def fetch_disruptions(random_user_agent):
-    """Scrape the disruptions from National Rail page."""
-    try:
-    
-        # Define the User Agent
-        headers = {"Upgrade-Insecure-Requests":"1","Priority":"u=0, i","User-Agent":random_user_agent,"Sec-Fetch-Dest":"document","Sec-Fetch-Site":"none","Sec-Fetch-User":"?1","Accept-Language":"en-US,en;q=0.5","Sec-Fetch-Mode":"navigate"}
-
-        # Send a request to fetch the HTML content of the page
-        response = requests.get(url, headers=headers,verify=False)
-        response.raise_for_status()  # Raise an exception if there's an error
-        logger.info("Successfully fetched data from National Rail website.")
-        response.encoding = 'utf-8'
-        # Parse the HTML content using BeautifulSoup
-        soup = BeautifulSoup(response.content, 'html.parser')
-
-        # Find all the disruption list items
-        disruptions = soup.find_all('li', class_='styled__StyledNotificationListItem-sc-nisfz3-3')
-
-        disruptions_list = []
-
-        for disruption in disruptions:
-            link = disruption.find('a', class_='styled__StyledNotificationBox-sc-2fuu9j-2')
-            if link:
-                aria_label = link.get('aria-label', 'No description available').strip()
-                href = link.get('href', '#').strip()
-
-                # Ensure the link has the full URL
-                full_link = f"https://www.nationalrail.co.uk{href}"
-
-                if aria_label not in seen_disruptions:
-                    disruptions_list.append((aria_label, full_link))
-                    seen_disruptions.add(aria_label)  # Mark this disruption as seen
-
-        logger.info(f"Found {len(disruptions_list)} new disruptions.")
-        return disruptions_list
-
-    except requests.RequestException as e:
-        logger.error(f"Error fetching disruptions: {e}")
-        return []
 
 
-def post_to_bluesky(message: str, url: str, link: str, description: str, facets: List[models.AppBskyRichtextFacet.Main] = None):
+
+def post_to_bluesky(message: str, url: str, link: str, linkz: str, description: str, facets: List[models.AppBskyRichtextFacet.Main] = None):
     """Post a disruption message to Bluesky using the atproto client."""
     retry_attempts = 3
     retry_delay = 120  # 2 minutes in seconds
@@ -270,35 +374,27 @@ def post_to_bluesky(message: str, url: str, link: str, description: str, facets:
             bluesky_password = os.getenv("BLUESKY_PASSWORD")
             profile = client.login(bluesky_handle, bluesky_password)
             logger.info(f"Logged in to Bluesky as {bluesky_handle}")
+            img_url, title, descriptionx = get_og_tags(link)
+            if title is None:
+               title = "National Rail Disruptions"
+            if descriptionx is None:
+               descriptionx = description
             
-            # Fetch the embed card
-            card = fetch_embed_url_card(link, description)
-
-            # Set up default image URL and thumbnail size
-            image_url = "https://images.nationalrail.co.uk/e8xgegruud3g/6PW6rjXST38APdJ49Og4uy/c87345a42e333defba267acade21faa0/aa-NationalRailLogo-noBeta.svg"
-            mime_type = "image/svg"
-            size = 5134  # Actual size in bytes of the image
-            
-            # Create the BlobRef object for the thumbnail
-            thumb_blob_ref = create_blob_ref(image_url, mime_type, size)
-
-            # Create the embed for the URL
-            embed = {
-                "$type": "app.bsky.embed.external",
-                "external": {
-                    "uri": card["uri"],
-                    "title": card["title"],
-                    "description": card["description"],
-                    "image": card.get("image", image_url)
-            }}
-
-            # Send the post to Bluesky
-            response = client.send_post(
-                text=message,
-                embed=embed,
-                facets=facets  # Add the facets for URL embedding
-            )
-
+            thumb_blob = None
+            img_url = search_random_image()
+            if img_url:
+               # Download image from og:image url and upload it as a blob
+               logger.debug(f"{img_url}")
+               img_data = httpx.get(img_url).content
+               thumb_blob = client.upload_blob(img_data).blob
+            logger.debug(f"Posting to Bluesky with message: {message}")
+            logger.debug(f"Link: {link}")
+            logger.debug(f"Description: {description}")
+            if facets:
+               logger.debug(f"Facets: {facets}")
+            # AppBskyEmbedExternal is the same as "link card" in the app
+            embed_external = models.AppBskyEmbedExternal.Main(external=models.AppBskyEmbedExternal.External(title=title, description=descriptionx, uri=link, thumb=thumb_blob))
+            response = client.send_post(text=message, embed=embed_external, facets=facets)
             # Log the full response to inspect the structure
             logger.debug(f"Response from Bluesky: {response}")
 
@@ -308,6 +404,8 @@ def post_to_bluesky(message: str, url: str, link: str, description: str, facets:
                 break  # Exit if the response doesn't have the expected fields
 
             logger.info(f"Successfully posted message to Bluesky: {message}")
+            # Mark the disruption as posted in the database
+            update_posted(link)
             break  # If post is successful, break out of the loop
 
         except HTTPError as e:
@@ -323,65 +421,50 @@ def post_to_bluesky(message: str, url: str, link: str, description: str, facets:
             break  # Break the loop on other errors (non-rate-limit related)
 
 
-
-
-
-
-
-
-
-
-
-
-
-            
 def main():
-    disruptions = fetch_disruptions(random_user_agent)  # Fetch disruptions from wherever it's sourced
+    if not os.path.exists('disruptions.db'):
+        create_db()  # Ensure the database and table are created if they don't exist
 
-    if disruptions:
-        for description, link in disruptions:
-            # Add hashtags
+    fetch_disruptions(random_user_agent)
+    # Fetch unposted disruptions from the database
+    unposted_disruptions = get_unposted_disruptions()
+
+    if unposted_disruptions:
+        for description, link in unposted_disruptions:
+            # Add hashtags and prepare the message
             description = modify_string(description)
-            # Format the message to include the disruption description and the URL
             message = f"{description}\n"
             logger.info(f"Posting disruption: {message}")
-
-            # Parse URLs in the message to ensure they are valid and can be used (e.g., for thumbnails)
-            url_positions = extract_url_byte_positions(message)  # Parsing URLs in the message
-            hashtag_positions = extract_hashtag_byte_positions(message)  # Parsing hashtags in the message
+            # Unaltered Link
+            linkz = link
+            # Parse URLs and hashtags
+            url_positions = extract_url_byte_positions(message)
+            hashtag_positions = extract_hashtag_byte_positions(message)
             facets = []
 
             for link_data in url_positions:
                 uri, byte_start, byte_end = link_data
-
-                # Create a link facet (for embedding links)
                 link_facet = models.AppBskyRichtextFacet.Main(
-                    features=[models.AppBskyRichtextFacet.Link(uri=uri)],  # Use link facet for external links
+                    features=[models.AppBskyRichtextFacet.Link(uri=uri)],
                     index=models.AppBskyRichtextFacet.ByteSlice(byte_start=byte_start, byte_end=byte_end),
                 )
                 facets.append(link_facet)
 
             for hashtag_data in hashtag_positions:
                 hashtag, byte_start, byte_end = hashtag_data
-
-                # Create a hashtag facet
                 hashtag_facet = models.AppBskyRichtextFacet.Main(
-                    features=[models.AppBskyRichtextFacet.Tag(tag=hashtag)],  # Use tag facet for hashtags
+                    features=[models.AppBskyRichtextFacet.Tag(tag=hashtag)],
                     index=models.AppBskyRichtextFacet.ByteSlice(byte_start=byte_start, byte_end=byte_end),
                 )
                 facets.append(hashtag_facet)
 
-            # Post the message to Bluesky with the richtext facets (which may contain embeds)
-            post_to_bluesky(message, url, link, description, facets=facets)
-            
-            # Wait between posts to avoid spamming
-            time.sleep(20)
+            # Post the message to Bluesky with the richtext facets
+            post_to_bluesky(message, url, link, linkz, description, facets=facets)
 
-        # Save the updated seen disruptions to the file to track posted disruptions
-        save_seen_disruptions(seen_disruptions)
+           
 
+            time.sleep(20)  # Optional sleep to avoid hitting rate limits
     else:
         logger.info("No new disruptions to post.")
-
 if __name__ == "__main__":
     main()
