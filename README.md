@@ -1,6 +1,10 @@
 # Natrail Disruptions Poster
 
-This project automates the posting of railway disruptions to Bluesky using the atproto Python SDK. It fetches disruption information, formats it, and posts it with relevant URLs and hashtags.
+This project automates the posting of railway disruptions to Bluesky using the atproto Python SDK. 
+
+It fetches disruption information, formats it, and posts it with relevant URLs and hashtags.
+
+It uses the flickr api to retrive images for posts thumbs
 
 Current Bluesky Profile: https://bsky.app/profile/natrail-bot.bsky.social
 
