@@ -1,4 +1,5 @@
 import flickrapi
+from groq import Groq
 import httpx
 import json
 import logging
@@ -114,15 +115,43 @@ _CONTENT_PATTERN = re.compile(r'<meta[^>]+content="([^"]+)"')
 
 
 
+def extract_first_operator_link(url):
+    # Send a GET request to the specified URL
+    response = requests.get(url)
+    
+    # Check if the request was successful
+    if response.status_code == 200:
+        # Parse the HTML content
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # Find all <a> tags
+        links = soup.find_all('a', href=True)
+        
+        # Filter links that contain '/travel-information/operators/'
+        operator_links = [link['href'] for link in links if '/travel-information/operators/' in link['href']]
+        
+        # Check if any links were found
+        if operator_links:
+            # Get the first link and strip '/travel-information/operators/' from it
+            first_link = operator_links[0].replace('/travel-information/operators/', '')
+            first_link = first_link.replace('/','')
+            logger.info(f"Operater Found: {first_link}")
+            return first_link
+        else:
+            print("No links found containing '/travel-information/operators/'")
+            return "Merseyrail"
+    else:
+        print(f"Failed to retrieve the webpage. Status code: {response.status_code}")
+        return "Merseyrail"
 
 
 
 
-def search_random_image():
+def search_random_image(link):
     # Get API key and secret from environment variables
     api_key = os.getenv('FLICKR_API_KEY')
     api_secret = os.getenv('FLICKR_API_SECRET')
-    search_string = 'Uk eletric trains'
+    search_string = ''+extract_first_operator_link(link)+' Train photo'
     # Initialize the Flickr API
     flickr = flickrapi.FlickrAPI(api_key, api_secret, format='parsed-json')
 
@@ -138,6 +167,7 @@ def search_random_image():
         random_photo = random.choice(photos)
         # Construct the URL for the image
         image_url = f"https://live.staticflickr.com/{random_photo['server']}/{random_photo['id']}_{random_photo['secret']}.jpg"
+        logger.info(f"Image URL: {image_url}")
         return image_url
     else:
         return None
@@ -381,7 +411,7 @@ def post_to_bluesky(message: str, url: str, link: str, linkz: str, description: 
                descriptionx = description
             
             thumb_blob = None
-            img_url = search_random_image()
+            img_url = search_random_image(link)
             if img_url:
                # Download image from og:image url and upload it as a blob
                logger.debug(f"{img_url}")
@@ -463,7 +493,7 @@ def main():
 
            
 
-            time.sleep(20)  # Optional sleep to avoid hitting rate limits
+            time.sleep(120)  # Optional sleep to avoid hitting rate limits
     else:
         logger.info("No new disruptions to post.")
 if __name__ == "__main__":
