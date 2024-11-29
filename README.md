@@ -26,7 +26,8 @@ Data Taken from: https://www.nationalrail.co.uk/status-and-disruptions/
 - `python-dotenv` library
 - `flickrapi` library
 - `requests` library
-
+- `sqlite3` library
+ 
 ## Installation
 
 1. Clone the repository:
