@@ -451,50 +451,69 @@ def post_to_bluesky(message: str, url: str, link: str, linkz: str, description: 
             break  # Break the loop on other errors (non-rate-limit related)
 
 
-def main():
-    if not os.path.exists('disruptions.db'):
-        create_db()  # Ensure the database and table are created if they don't exist
+def main_loop():
+    while True:
+        try:
+            if not os.path.exists('disruptions.db'):
+                create_db()  # Ensure the database and table are created if they don't exist
+            
+            fetch_disruptions(random_user_agent)
+            # Fetch unposted disruptions from the database
+            unposted_disruptions = get_unposted_disruptions()
+            
+            if unposted_disruptions:
+                for description, link in unposted_disruptions:
+                    try:
+                        # Add hashtags and prepare the message
+                        description = modify_string(description)
+                        message = f"{description}\n"
+                        logger.info(f"Posting disruption: {message}")
+                        # Unaltered Link
+                        linkz = link
+                        
+                        # Parse URLs and hashtags
+                        url_positions = extract_url_byte_positions(message)
+                        hashtag_positions = extract_hashtag_byte_positions(message)
+                        facets = []
+                        
+                        for link_data in url_positions:
+                            uri, byte_start, byte_end = link_data
+                            link_facet = models.AppBskyRichtextFacet.Main(
+                                features=[models.AppBskyRichtextFacet.Link(uri=uri)],
+                                index=models.AppBskyRichtextFacet.ByteSlice(byte_start=byte_start, byte_end=byte_end),
+                            )
+                            facets.append(link_facet)
+                            
+                        for hashtag_data in hashtag_positions:
+                            hashtag, byte_start, byte_end = hashtag_data
+                            hashtag_facet = models.AppBskyRichtextFacet.Main(
+                                features=[models.AppBskyRichtextFacet.Tag(tag=hashtag)],
+                                index=models.AppBskyRichtextFacet.ByteSlice(byte_start=byte_start, byte_end=byte_end),
+                            )
+                            facets.append(hashtag_facet)
+                            
+                        # Post the message to Bluesky with the richtext facets
+                        post_to_bluesky(message, url, link, linkz, description, facets=facets)
+                        time.sleep(120)  # Keep the 2-minute delay between posts
+                        
+                    except Exception as e:
+                        logger.error(f"Error processing disruption: {e}")
+                        continue  # Continue to next disruption if one fails
+                        
+            else:
+                logger.info("No new disruptions to post.")
+                
+            logger.info("Sleeping for 20 minutes before next check...")
+            time.sleep(1200)  # 20 minutes sleep between full runs
+            
+        except Exception as e:
+            logger.error(f"Major error in main loop: {e}")
+            logger.info("Sleeping for 20 minutes before retry...")
+            time.sleep(1200)  # Sleep even if there's an error, then retry
 
-    fetch_disruptions(random_user_agent)
-    # Fetch unposted disruptions from the database
-    unposted_disruptions = get_unposted_disruptions()
-
-    if unposted_disruptions:
-        for description, link in unposted_disruptions:
-            # Add hashtags and prepare the message
-            description = modify_string(description)
-            message = f"{description}\n"
-            logger.info(f"Posting disruption: {message}")
-            # Unaltered Link
-            linkz = link
-            # Parse URLs and hashtags
-            url_positions = extract_url_byte_positions(message)
-            hashtag_positions = extract_hashtag_byte_positions(message)
-            facets = []
-
-            for link_data in url_positions:
-                uri, byte_start, byte_end = link_data
-                link_facet = models.AppBskyRichtextFacet.Main(
-                    features=[models.AppBskyRichtextFacet.Link(uri=uri)],
-                    index=models.AppBskyRichtextFacet.ByteSlice(byte_start=byte_start, byte_end=byte_end),
-                )
-                facets.append(link_facet)
-
-            for hashtag_data in hashtag_positions:
-                hashtag, byte_start, byte_end = hashtag_data
-                hashtag_facet = models.AppBskyRichtextFacet.Main(
-                    features=[models.AppBskyRichtextFacet.Tag(tag=hashtag)],
-                    index=models.AppBskyRichtextFacet.ByteSlice(byte_start=byte_start, byte_end=byte_end),
-                )
-                facets.append(hashtag_facet)
-
-            # Post the message to Bluesky with the richtext facets
-            post_to_bluesky(message, url, link, linkz, description, facets=facets)
-
-           
-
-            time.sleep(120)  # Optional sleep to avoid hitting rate limits
-    else:
-        logger.info("No new disruptions to post.")
 if __name__ == "__main__":
-    main()
+    try:
+        logger.info("Starting continuous monitoring...")
+        main_loop()
+    except KeyboardInterrupt:
+        logger.info("Shutting down gracefully...")
