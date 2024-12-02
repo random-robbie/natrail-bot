@@ -54,3 +54,10 @@ Data Taken from: https://www.nationalrail.co.uk/status-and-disruptions/
 Run the script to post the latest disruptions to Bluesky:
 ```bash
 python natrail.py
+```
+
+You can run it on a VPS.
+
+[![DigitalOcean Referral Badge](https://web-platforms.sfo2.cdn.digitaloceanspaces.com/WWW/Badge%203.svg)](https://www.digitalocean.com/?refcode=e22bbff5f6f1&utm_campaign=Referral_Invite&utm_medium=Referral_Program&utm_source=badge)
+
+You get free $200 credit for 60 days if you sign up and add a payment method.
